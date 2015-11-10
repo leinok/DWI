@@ -1,0 +1,72 @@
+% -------------------------------------------------------------------------
+% DWI-DCE Project. Investigate various technique factors.
+%
+% Single image ROI analysis
+% Input:
+% - dataFolder: the folder which DWIMatrix stores.
+% - interestedNum: single image number
+%
+% -- Example:
+%  singledwianalysis('\DWI-DCE Project\Data\1048950\0217\IRDWI\', 28);
+% -- Lei Yang
+% -------------------------------------------------------------------------
+
+function [ output_args ] = singledwianalysis(dataFolder, interestedNum)
+
+load([dataFolder, 'DWIMatrix']);
+load([dataFolder, 'GEAdc']);
+combOrder = combnk(1:nDataSets, 2)                                % Currently we consider 2 combinations
+numOfCombinations = size(combOrder, 1);
+
+adcMap = zeros(height, width, numOfCombinations+3);               % ADC maps
+yMatrix = zeros(nDataSets, width*height);
+
+bValueMatrix = repmat(bValueArray',1,height*width);               % Speed up the polyfit calculations
+
+tempStr = dataFolder;
+for iter = 1:9
+    [x{iter}, y] = strtok(tempStr, '\');
+    tempStr = y;
+end
+
+infoStruct.mrn = str2num(x{8});
+infoStruct.date = str2num(x{9});
+
+for i = interestedNum:interestedNum
+    
+    adcMap(:,:,1) = double(GEAdc(:,:,i))/1000000;                 % Directly load from GE ADC
+    for j = 1:nDataSets
+        yMatrix(j,:) =  reshape(imageMatrix(:,:,i,j), 1, width*height);
+    end
+    ind = find(yMatrix == 0);
+    yMatrix = log(double(yMatrix));                               % Be careful about the case of log(0)
+    yMatrix(ind) = 0;
+    [C] = polyfitMatrix(bValueMatrix, yMatrix, 1);
+
+    adcMap(:,:,2) = reshape(-C(2,:), height, width);              % 2nd All B-values
+    
+    slope = weightedfitmatrix(bValueArray', yMatrix, [1 1 1]');
+    adcMap(:,:,6) = reshape(-slope, height, width);               % 6th Weighting
+    
+    for k = 1:numOfCombinations
+        bPartValueMatrix = bValueMatrix(combOrder(k,:),:);
+        yPartMatrix = yMatrix(combOrder(k,:),:);
+        
+        adc = (yPartMatrix(1,:)-yPartMatrix(2,:))./...
+            (bPartValueMatrix(2,:)-bPartValueMatrix(1,:));
+        
+        adcMap(:,:,k+2) = reshape(adc, height, width);            % 3rd-5th, 2 B-values
+    end
+    
+    infoStruct.serialNum = i;
+    
+    roiWindow = CROIAnalyze(adcMap, infoStruct, num2str(bValueArray(combOrder)), numOfCombinations+2, ...
+        bValueArray, yMatrix); % all the adc except for the GE
+    
+%     msg = sprintf('ROI-Analyzer-#%d, %d, %d', [infoStruct.mrn infoStruct.date i ]);
+%     close(findobj('type','figure','name',msg));
+end    
+
+
+end
+
